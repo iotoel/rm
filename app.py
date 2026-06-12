@@ -2,6 +2,7 @@ import streamlit as st
 import bcrypt
 import requests
 import hashlib
+import json
 
 
 # =========================================================
@@ -62,7 +63,8 @@ def load_raw():
     try:
         response = requests.get(data_link)
         response.raise_for_status()
-        data = response.json()
+
+        return json.loads(response.content.decode("utf-8-sig"))
         return data
 
     except requests.exceptions.RequestException as e:
