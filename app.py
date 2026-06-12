@@ -1,6 +1,81 @@
 import streamlit as st
 import bcrypt
+import requests
+import hashlib
 
+
+# =========================================================
+# engine/cgu_builder.py
+# =========================================================
+def make_id(*parts):
+    return hashlib.md5("::".join(parts).encode("utf-8")).hexdigest()
+
+
+def build_cgu(raw):
+    units = []
+
+    for section in raw.get("sections", []):
+        section_title = section.get("title", "")
+        section_id = section.get("id", "")
+
+        for topic in section.get("topics", []):
+            topic_title = topic.get("title", "")
+
+            unit_id = make_id(section_id, topic_title)
+
+            units.append({
+                "id": unit_id,
+                "section": section_title,
+                "topic": topic_title,
+                "data": topic
+            })
+
+    return {"units": units}
+
+
+# =========================================================
+# engine/cgu_search.py
+# =========================================================
+def search_cgu(cgu, query: str):
+    q = query.lower().strip().split()
+
+    results = []
+
+    for unit in cgu.get("units", []):
+        topic = unit.get("topic", "").lower()
+        section = unit.get("section", "").lower()
+
+        text = f"{topic} {section}"
+
+        if all(word in text for word in q):
+            results.append(unit)
+
+    return results
+
+
+# =========================================================
+# engine/loader.py
+# =========================================================
+def load_raw():
+    data_link = st.secrets["DATA_LINK"]
+
+    try:
+        response = requests.get(data_link)
+        response.raise_for_status()
+        data = response.json()
+        return data
+
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Fehler beim Laden der Daten: {e}")
+
+
+def load_cgu():
+    return build_cgu(load_raw())
+
+
+# =========================================================
+# app.py
+# =========================================================
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
@@ -21,10 +96,6 @@ if not st.session_state.authenticated:
 
     st.stop()
 
-from engine.loader import load_cgu
-from engine.cgu_search import search_cgu
-import json
-
 # Lade alle Daten
 cgu = load_cgu()
 
@@ -35,7 +106,7 @@ query = st.text_input("Frage/Begriff eingeben:")
 
 if query:
     results = search_cgu(cgu, query)
-    
+
     if not results:
         st.warning("Keine Ergebnisse gefunden.")
     else:
