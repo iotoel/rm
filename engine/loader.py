@@ -20,8 +20,8 @@ def load_raw():
         # JSON-Daten laden
         data = response.json()
 
-        if "sections" not in data:
-            raise ValueError("RAW JSON missing 'sections'")
+        #if "sections" not in data:
+         #   raise ValueError("RAW JSON missing 'sections'")
 
         return data
 
