@@ -3,6 +3,7 @@ import bcrypt
 import requests
 import json
 import os
+from cryptography.fernet import Fernet
 
 
 # =========================================================
@@ -10,22 +11,34 @@ import os
 # =========================================================
 LOCAL_PATH = os.path.join(os.path.dirname(__file__), "data", "rumantsch.json")
 
+ENCRYPTED_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "data",
+    "rumantsch.json.enc"
+)
+
 
 def load_raw():
-    # 1. Versuch: lokale Datei
+    # 1. Versuch: unverschlüsselte lokale Datei
     try:
         with open(LOCAL_PATH, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         pass
 
-    # 2. Versuch: DATA_LINK
+    # 2. Versuch: verschlüsselte Datei
     try:
-        data_link = st.secrets["DATA_LINK"]
-        response = requests.get(data_link)
-        response.raise_for_status()
-        return json.loads(response.content.decode("utf-8-sig"))
-    except requests.exceptions.RequestException as e:
+        key = st.secrets["FERNET_KEY"]
+
+        with open(ENCRYPTED_PATH, "rb") as f:
+            encrypted = f.read()
+
+        fernet = Fernet(key.encode())
+        decrypted = fernet.decrypt(encrypted)
+
+        return json.loads(decrypted.decode("utf-8-sig"))
+
+    except Exception as e:
         raise RuntimeError(f"Fehler beim Laden der Daten: {e}")
 
 
