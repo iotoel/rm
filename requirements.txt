@@ -4,4 +4,4 @@ chromadb
 sentence-transformers
 langchain
 pandas
-cryptography.fernet
+cryptography
