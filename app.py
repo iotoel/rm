@@ -40,6 +40,7 @@ def build_index(raw):
     """
     topics = []
     words = []
+    patterns = []
 
     # --- Grammatik-Themen ---
     grammar = raw.get("grammar", {})
@@ -54,13 +55,23 @@ def build_index(raw):
                 "data": topic,
             })
 
-        # Sections mit "entries" direkt (z.B. Intro/Graphie)
+        # Sections mit "entries" direkt (z.B. Intro/Graphie und Aussprache)
         if "entries" in section and "topics" not in section:
             topics.append({
                 "section": section_title,
                 "title": section_title,
                 "data": section,
             })
+
+            # Einzelne Aussprache-Muster separat indexieren
+            for entry in section["entries"]:
+                if "pattern" in entry:
+                    patterns.append({
+                        "section": section_title,
+                        "pattern": entry.get("pattern", ""),
+                        "note": entry.get("note", ""),
+                        "examples": entry.get("examples", []),
+                    })
 
     # --- Vocabulari (Lectiuns) ---
     vocab = raw.get("vocabulary", {})
@@ -84,7 +95,7 @@ def build_index(raw):
             "translation": entry.get("deutsch", ""),
         })
 
-    return {"topics": topics, "words": words}
+    return {"topics": topics, "words": words, "patterns": patterns}
 
 
 # =========================================================
@@ -106,6 +117,21 @@ def search_topics(index, query: str):
         text = f"{t['title']} {t['section']}".lower()
         if all(word in text for word in q):
             results.append(t)
+    return results
+
+
+def search_patterns(index, query: str):
+    q = query.lower().strip()
+    results = []
+    for p in index["patterns"]:
+        # Aussprache-Pattern wie "ca – co – cu" oder "gli – glü und –gl am Wortende"
+        # in einzelne Tokens zerlegen und auf Gleichheit/Teilstring prüfen
+        raw_pattern = p["pattern"].lower()
+        tokens = [tok.strip() for tok in raw_pattern.replace("–", "-").split("-")]
+        tokens = [tok for sub in tokens for tok in sub.split()]
+
+        if q in tokens or q in raw_pattern:
+            results.append(p)
     return results
 
 
@@ -165,6 +191,13 @@ def render_word(w):
     st.caption(f"Quelle: {w['source']}")
 
 
+def render_pattern(p):
+    st.markdown(f"**{p['pattern']}** — {p['note']}")
+    if p["examples"]:
+        st.write(", ".join(str(e) for e in p["examples"]))
+    st.caption(f"Quelle: {p['section']}")
+
+
 # =========================================================
 # app.py
 # =========================================================
@@ -200,10 +233,17 @@ query = st.text_input("Frage/Begriff eingeben:")
 if query:
     word_results = search_words(index, query)
     topic_results = search_topics(index, query)
+    pattern_results = search_patterns(index, query)
 
-    if not word_results and not topic_results:
+    if not word_results and not topic_results and not pattern_results:
         st.warning("Keine Ergebnisse gefunden.")
     else:
+        # Aussprache-Treffer: kompakt (Pattern + Erklärung + Beispiele)
+        if pattern_results:
+            st.markdown("### 🔊 Aussprache")
+            for p in pattern_results:
+                render_pattern(p)
+
         # Voci-Treffer: kompakt (Voci + Übersetzung)
         if word_results:
             st.markdown("### 📖 Vocabulari")
