@@ -1,9 +1,17 @@
-import streamlit as st
-import bcrypt
-import requests
 import json
 import os
+import threading
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import quote
+
+import bcrypt
+import requests
+import streamlit as st
+import streamlit.components.v1 as components
 from cryptography.fernet import Fernet
+
+st.set_page_config(layout="wide")
 
 
 # =========================================================
@@ -214,6 +222,46 @@ def render_pattern(p):
 # =========================================================
 # app.py
 # =========================================================
+def find_pdf_path():
+    data_dir = Path(__file__).resolve().parent / "data"
+    pdf_files = sorted(data_dir.glob("*.pdf"))
+    return pdf_files[0] if pdf_files else None
+
+
+def get_or_start_pdf_server(pdf_path: Path):
+    key = "pdf_server"
+    if key in st.session_state:
+        return st.session_state[key]
+
+    class QuietHandler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(pdf_path.parent), **kwargs)
+
+        def log_message(self, format, *args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    st.session_state[key] = server
+    return server
+
+
+def render_pdf_panel():
+    pdf_path = find_pdf_path()
+
+    if not pdf_path:
+        st.info("Keine PDF-Datei im Ordner data gefunden.")
+        return
+
+    st.markdown("### 📄 PDF")
+    server = get_or_start_pdf_server(pdf_path)
+    pdf_url = f"http://127.0.0.1:{server.server_address[1]}/{quote(pdf_path.name)}"
+
+    components.iframe(pdf_url, height=850, scrolling=True)
+    st.caption("Die PDF wird direkt aus dem lokalen App-Ordner im Browser angezeigt.")
+    st.info("Falls der Frame leer bleibt, bitte die Seite neu laden.")
+
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
@@ -240,31 +288,37 @@ index = build_index(raw)
 
 st.title("📘 Romanische Grammatik Explorer")
 
-# Eingabe für Suche
-query = st.text_input("Frage/Begriff eingeben:")
+left_col, right_col = st.columns([2, 1], gap="large")
 
-if query:
-    word_results = search_words(index, query)
-    topic_results = search_topics(index, query)
-    pattern_results = search_patterns(index, query)
+with left_col:
+    # Eingabe für Suche
+    query = st.text_input("Frage/Begriff eingeben:")
 
-    if not word_results and not topic_results and not pattern_results:
-        st.warning("Keine Ergebnisse gefunden.")
-    else:
-        # Aussprache-Treffer: kompakt (Pattern + Erklärung + Beispiele)
-        if pattern_results:
-            st.markdown("### 🔊 Aussprache")
-            for p in pattern_results:
-                render_pattern(p)
+    if query:
+        word_results = search_words(index, query)
+        topic_results = search_topics(index, query)
+        pattern_results = search_patterns(index, query)
 
-        # Voci-Treffer: kompakt (Voci + Übersetzung)
-        if word_results:
-            st.markdown("### 📖 Vocabulari")
-            for w in word_results:
-                render_word(w)
+        if not word_results and not topic_results and not pattern_results:
+            st.warning("Keine Ergebnisse gefunden.")
+        else:
+            # Aussprache-Treffer: kompakt (Pattern + Erklärung + Beispiele)
+            if pattern_results:
+                st.markdown("### 🔊 Aussprache")
+                for p in pattern_results:
+                    render_pattern(p)
 
-        # Themen-Treffer: ausführlich (ganzes Thema)
-        if topic_results:
-            st.markdown("### 📚 Grammatik")
-            for t in topic_results:
-                render_topic(t)
+            # Voci-Treffer: kompakt (Voci + Übersetzung)
+            if word_results:
+                st.markdown("### 📖 Vocabulari")
+                for w in word_results:
+                    render_word(w)
+
+            # Themen-Treffer: ausführlich (ganzes Thema)
+            if topic_results:
+                st.markdown("### 📚 Grammatik")
+                for t in topic_results:
+                    render_topic(t)
+
+with right_col:
+    render_pdf_panel()
