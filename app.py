@@ -15,65 +15,51 @@ st.set_page_config(layout="wide")
 # =========================================================
 # engine/loader.py
 # =========================================================
-LOCAL_PATH = os.path.join(os.path.dirname(__file__), "data", "rumantsch.json")
-
-try:
-    ENCRYPTED_PATH = os.path.join(
-        os.path.dirname(__file__),
-        "data",
-        "rumantsch.json.enc"
-    )
-except Exception as e:
-    ENCRYPTED_PATH = None
-    print(f"[DEBUG] ENCRYPTED_PATH konnte nicht gesetzt werden: {e}")
-
 
 def load_raw():
-    # 1. Versuch: JSON von GitHub laden (wenn Secrets vorhanden)
-    try:
-        github_token = st.secrets.get("GITHUB_TOKEN")
-        github_json_base_url = st.secrets.get("GITHUB_JSON_BASE_URL")
-        github_json_file = st.secrets.get("GITHUB_JSON_FILE")
-        
-        if github_token and github_json_base_url and github_json_file:
-            headers = {"Authorization": f"token {github_token}"}
-            json_url = f"{github_json_base_url}/{github_json_file}"
-            print(f"[DEBUG] Versuche JSON von GitHub zu laden: {json_url}")
-            response = requests.get(json_url, headers=headers, timeout=10)
-            response.raise_for_status()
-            print(f"[DEBUG] ✅ JSON erfolgreich von GitHub geladen")
-            return response.json()
-        else:
-            print(f"[DEBUG] GitHub-Secrets nicht komplett gesetzt. Token: {bool(github_token)}, URL: {bool(github_json_base_url)}, File: {bool(github_json_file)}")
-    except Exception as e:
-        print(f"[DEBUG] ❌ Fehler beim Laden von GitHub: {e}")
+    """
+    Lädt die rumantsch.json vom privaten GitHub-Repo.
+    Benötigt folgende Secrets:
+    - GITHUB_TOKEN
+    - GITHUB_JSON_BASE_URL (z.B. https://raw.githubusercontent.com/iotoel/rm-pdf/main)
+    - GITHUB_JSON_FILE (z.B. rumantsch.json)
+    """
+    github_token = st.secrets.get("GITHUB_TOKEN")
+    github_json_base_url = st.secrets.get("GITHUB_JSON_BASE_URL")
+    github_json_file = st.secrets.get("GITHUB_JSON_FILE")
     
-    # 2. Versuch: unverschlüsselte lokale Datei
+    # Prüfe, ob alle Secrets vorhanden sind
+    if not (github_token and github_json_base_url and github_json_file):
+        missing = []
+        if not github_token:
+            missing.append("GITHUB_TOKEN")
+        if not github_json_base_url:
+            missing.append("GITHUB_JSON_BASE_URL")
+        if not github_json_file:
+            missing.append("GITHUB_JSON_FILE")
+        raise RuntimeError(f"Fehlende Secrets: {', '.join(missing)}")
+    
     try:
-        print(f"[DEBUG] Versuche lokale unverschlüsselte Datei zu laden: {LOCAL_PATH}")
-        with open(LOCAL_PATH, "r", encoding="utf-8-sig") as f:
-            print(f"[DEBUG] ✅ Lokale JSON erfolgreich geladen")
-            return json.load(f)
-    except (FileNotFoundError, OSError, json.JSONDecodeError) as e:
-        print(f"[DEBUG] ❌ Lokale unverschlüsselte Datei nicht verfügbar: {e}")
-
-    # 3. Versuch: verschlüsselte Datei (Fallback für alte Setups)
-    try:
-        print(f"[DEBUG] Versuche verschlüsselte Datei zu laden: {ENCRYPTED_PATH}")
-        key = st.secrets["FERNET_KEY"]
-
-        with open(ENCRYPTED_PATH, "rb") as f:
-            encrypted = f.read()
-
-        fernet = Fernet(key.encode())
-        decrypted = fernet.decrypt(encrypted)
-
-        print(f"[DEBUG] ✅ Verschlüsselte Datei erfolgreich entschlüsselt")
-        return json.loads(decrypted.decode("utf-8-sig"))
-
+        json_url = f"{github_json_base_url}/{github_json_file}"
+        print(f"[INFO] Lade JSON von: {json_url}")
+        
+        headers = {"Authorization": f"token {github_token}"}
+        response = requests.get(json_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        print(f"[INFO] ✅ JSON erfolgreich geladen ({len(str(data)) / 1024:.1f} KB)")
+        return data
+        
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            raise RuntimeError(f"Datei nicht gefunden auf GitHub: {json_url}")
+        elif e.response.status_code == 401:
+            raise RuntimeError(f"Authentifizierung fehlgeschlagen - prüfe GITHUB_TOKEN")
+        else:
+            raise RuntimeError(f"GitHub-Fehler ({e.response.status_code}): {e}")
     except Exception as e:
-        print(f"[DEBUG] ❌ Verschlüsselte Datei nicht verfügbar: {e}")
-        raise RuntimeError(f"Fehler beim Laden der Daten - alle Methoden fehlgeschlagen: {e}")
+        raise RuntimeError(f"Fehler beim Laden der JSON: {e}")
 
 
 # =========================================================
