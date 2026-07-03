@@ -25,14 +25,29 @@ ENCRYPTED_PATH = os.path.join(
 
 
 def load_raw():
-    # 1. Versuch: unverschlüsselte lokale Datei
+    # 1. Versuch: JSON von GitHub laden (wenn Secrets vorhanden)
+    try:
+        github_token = st.secrets.get("GITHUB_TOKEN")
+        github_json_base_url = st.secrets.get("GITHUB_JSON_BASE_URL")
+        github_json_file = st.secrets.get("GITHUB_JSON_FILE")
+        
+        if github_token and github_json_base_url and github_json_file:
+            headers = {"Authorization": f"token {github_token}"}
+            json_url = f"{github_json_base_url}/{github_json_file}"
+            response = requests.get(json_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        pass  # Fallback versuchen
+    
+    # 2. Versuch: unverschlüsselte lokale Datei
     try:
         with open(LOCAL_PATH, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         pass
 
-    # 2. Versuch: verschlüsselte Datei
+    # 3. Versuch: verschlüsselte Datei (Fallback für alte Setups)
     try:
         key = st.secrets["FERNET_KEY"]
 
