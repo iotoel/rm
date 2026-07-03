@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import bcrypt
+import requests
 import streamlit as st
 from cryptography.fernet import Fernet
 
@@ -296,15 +297,11 @@ def render_pdf_mode():
     
     st.markdown("---")
     
-    pdf_path = find_pdf_path()
-
-    if not pdf_path:
-        st.info("Keine PDF-Datei im Ordner data gefunden.")
-        return
-
-    page_images = render_pdf_pages(pdf_path)
+    # Versuche PDF aus Secrets zu laden, Fallback auf lokale Datei
+    page_images = render_pdf_pages(pdf_path=None)
+    
     if not page_images:
-        st.warning("Die PDF konnte nicht in Bilder umgewandelt werden.")
+        st.warning("Die PDF konnte nicht geladen werden.")
         return
 
     st.markdown("Scroll nach unten, um alle Seiten des PDFs zu sehen.")
@@ -323,18 +320,77 @@ def find_pdf_path():
 
 
 @st.cache_data(show_spinner=False)
-def render_pdf_pages(pdf_path: Path):
-    doc = fitz.open(str(pdf_path))
-    images = []
-    zoom = 2.0
-    matrix = fitz.Matrix(zoom, zoom)
-
-    for page_number in range(len(doc)):
-        page = doc.load_page(page_number)
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
-        png_bytes = pix.tobytes(output="png")
-        images.append((page_number + 1, png_bytes))
-    return images
+def render_pdf_pages(pdf_path: Path = None):
+    """
+    Lädt PDF-Seiten als Bilder.
+    Wenn pdf_path None ist, werden die PDFs aus GitHub via Secrets geladen.
+    Unterstützt mehrere PDF-Teile.
+    """
+    try:
+        images = []
+        zoom = 2.0
+        matrix = fitz.Matrix(zoom, zoom)
+        
+        # Versuche zuerst, die PDFs von GitHub zu laden (für Streamlit Cloud)
+        if pdf_path is None:
+            try:
+                github_token = st.secrets.get("GITHUB_TOKEN")
+                github_pdf_base_url = st.secrets.get("GITHUB_PDF_BASE_URL")
+                github_pdf_files = st.secrets.get("GITHUB_PDF_FILES")
+                
+                if github_token and github_pdf_base_url and github_pdf_files:
+                    headers = {"Authorization": f"token {github_token}"}
+                    
+                    # Liste der PDF-Dateien
+                    pdf_files = [f.strip() for f in github_pdf_files.split(",")]
+                    
+                    for pdf_file in pdf_files:
+                        pdf_url = f"{github_pdf_base_url}/{pdf_file}"
+                        response = requests.get(pdf_url, headers=headers, timeout=10)
+                        response.raise_for_status()
+                        
+                        doc = fitz.open(stream=response.content, filetype="pdf")
+                        
+                        for page_number in range(len(doc)):
+                            page = doc.load_page(page_number)
+                            pix = page.get_pixmap(matrix=matrix, alpha=False)
+                            png_bytes = pix.tobytes(output="png")
+                            images.append((len(images) + 1, png_bytes))
+                    
+                    if not images:
+                        raise ValueError("Keine Seiten aus PDFs geladen")
+                else:
+                    raise ValueError("GITHUB_TOKEN, GITHUB_PDF_BASE_URL oder GITHUB_PDF_FILES nicht in Secrets gefunden")
+            except Exception as e:
+                st.warning(f"Konnte PDFs nicht von GitHub laden: {e}")
+                # Fallback: Versuche lokale PDFs zu laden
+                data_dir = Path(__file__).resolve().parent / "data"
+                pdf_files = sorted(data_dir.glob("*.pdf"))
+                
+                if not pdf_files:
+                    raise RuntimeError("Weder GitHub-PDFs noch lokale PDFs verfügbar")
+                
+                for pdf_file in pdf_files:
+                    doc = fitz.open(str(pdf_file))
+                    for page_number in range(len(doc)):
+                        page = doc.load_page(page_number)
+                        pix = page.get_pixmap(matrix=matrix, alpha=False)
+                        png_bytes = pix.tobytes(output="png")
+                        images.append((len(images) + 1, png_bytes))
+        else:
+            # Lokales PDF laden (Fallback)
+            doc = fitz.open(str(pdf_path))
+            for page_number in range(len(doc)):
+                page = doc.load_page(page_number)
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+                png_bytes = pix.tobytes(output="png")
+                images.append((page_number + 1, png_bytes))
+        
+        return images
+    
+    except Exception as e:
+        st.error(f"Fehler beim Laden der PDFs: {e}")
+        return []
 
 
 if "authenticated" not in st.session_state:
