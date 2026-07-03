@@ -17,11 +17,15 @@ st.set_page_config(layout="wide")
 # =========================================================
 LOCAL_PATH = os.path.join(os.path.dirname(__file__), "data", "rumantsch.json")
 
-ENCRYPTED_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "data",
-    "rumantsch.json.enc"
-)
+try:
+    ENCRYPTED_PATH = os.path.join(
+        os.path.dirname(__file__),
+        "data",
+        "rumantsch.json.enc"
+    )
+except Exception as e:
+    ENCRYPTED_PATH = None
+    print(f"[DEBUG] ENCRYPTED_PATH konnte nicht gesetzt werden: {e}")
 
 
 def load_raw():
