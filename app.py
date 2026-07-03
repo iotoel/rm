@@ -311,14 +311,16 @@ def render_pdf_mode():
     
     st.markdown("---")
     
-    # Versuche PDF aus Secrets zu laden, Fallback auf lokale Datei
-    page_images = render_pdf_pages(pdf_path=None)
+    # Laden mit Spinner-Nachricht
+    with st.spinner("⏳ Lade PDF-Dateien von GitHub... (dies kann einige Sekunden dauern)"):
+        page_images = render_pdf_pages(pdf_path=None)
     
     if not page_images:
-        st.warning("Die PDF konnte nicht geladen werden.")
+        st.error("❌ Die PDF konnte nicht geladen werden. Bitte prüfe die Logs.")
         return
 
-    st.markdown("Scroll nach unten, um alle Seiten des PDFs zu sehen.")
+    st.markdown(f"✅ Erfolgreich geladen! {len(page_images)} Seiten")
+    st.markdown("Scroll nach unten, um alle Seiten zu sehen.")
 
     for page_num, image in page_images:
         st.image(image, caption=f"Seite {page_num}")
@@ -339,10 +341,14 @@ def render_pdf_pages(pdf_path: Path = None):
     Lädt PDF-Seiten als Bilder.
     Wenn pdf_path None ist, werden die PDFs aus GitHub via Secrets geladen.
     Unterstützt mehrere PDF-Teile.
+    
+    Optimiert für große PDF-Dateien:
+    - Zoom 1.5 statt 2.0 (bessere Balance zwischen Qualität und RAM)
+    - Längeres Timeout für große Dateidownloads
     """
     try:
         images = []
-        zoom = 2.0
+        zoom = 1.5  # Reduziert von 2.0 - bessere Performance bei großen PDFs
         matrix = fitz.Matrix(zoom, zoom)
         
         # Versuche zuerst, die PDFs von GitHub zu laden (für Streamlit Cloud)
@@ -352,21 +358,24 @@ def render_pdf_pages(pdf_path: Path = None):
                 github_pdf_base_url = st.secrets.get("GITHUB_PDF_BASE_URL")
                 github_pdf_files = st.secrets.get("GITHUB_PDF_FILES")
                 
-                # Debug-Ausgabe: Welche Secrets sind vorhanden?
-                all_secrets = list(st.secrets.keys())
-                
                 if github_token and github_pdf_base_url and github_pdf_files:
                     headers = {"Authorization": f"token {github_token}"}
                     
                     # Liste der PDF-Dateien
                     pdf_files = [f.strip() for f in github_pdf_files.split(",")]
                     
-                    for pdf_file in pdf_files:
+                    print(f"[INFO] Lade {len(pdf_files)} PDF-Datei(en) von GitHub...")
+                    
+                    for pdf_idx, pdf_file in enumerate(pdf_files, 1):
                         pdf_url = f"{github_pdf_base_url}/{pdf_file}"
-                        response = requests.get(pdf_url, headers=headers, timeout=10)
+                        print(f"[INFO] ({pdf_idx}/{len(pdf_files)}) Lade: {pdf_file}")
+                        
+                        # 30 Sekunden Timeout für große Dateidownloads
+                        response = requests.get(pdf_url, headers=headers, timeout=30)
                         response.raise_for_status()
                         
                         doc = fitz.open(stream=response.content, filetype="pdf")
+                        print(f"[INFO]   → {len(doc)} Seiten konvertiere...")
                         
                         for page_number in range(len(doc)):
                             page = doc.load_page(page_number)
@@ -374,6 +383,7 @@ def render_pdf_pages(pdf_path: Path = None):
                             png_bytes = pix.tobytes(output="png")
                             images.append((len(images) + 1, png_bytes))
                     
+                    print(f"[INFO] ✅ {len(images)} Seiten erfolgreich geladen")
                     if not images:
                         raise ValueError("Keine Seiten aus PDFs geladen")
                 else:
@@ -386,24 +396,11 @@ def render_pdf_pages(pdf_path: Path = None):
                     if not github_pdf_files:
                         missing.append("GITHUB_PDF_FILES")
                     
-                    error_msg = f"Folgende Secrets fehlen: {', '.join(missing)}. Verfügbare Secrets: {all_secrets}"
+                    error_msg = f"Folgende Secrets fehlen: {', '.join(missing)}"
                     raise ValueError(error_msg)
             except Exception as e:
-                st.warning(f"Konnte PDFs nicht von GitHub laden: {e}")
-                # Fallback: Versuche lokale PDFs zu laden
-                data_dir = Path(__file__).resolve().parent / "data"
-                pdf_files = sorted(data_dir.glob("*.pdf"))
-                
-                if not pdf_files:
-                    raise RuntimeError("Weder GitHub-PDFs noch lokale PDFs verfügbar")
-                
-                for pdf_file in pdf_files:
-                    doc = fitz.open(str(pdf_file))
-                    for page_number in range(len(doc)):
-                        page = doc.load_page(page_number)
-                        pix = page.get_pixmap(matrix=matrix, alpha=False)
-                        png_bytes = pix.tobytes(output="png")
-                        images.append((len(images) + 1, png_bytes))
+                print(f"[ERROR] Fehler beim PDF-Download: {e}")
+                raise
         else:
             # Lokales PDF laden (Fallback)
             doc = fitz.open(str(pdf_path))
@@ -416,6 +413,7 @@ def render_pdf_pages(pdf_path: Path = None):
         return images
     
     except Exception as e:
+        print(f"[ERROR] Fehler beim Laden der PDFs: {e}")
         st.error(f"Fehler beim Laden der PDFs: {e}")
         return []
 
