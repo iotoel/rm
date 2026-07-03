@@ -1,14 +1,11 @@
+import base64
+import fitz
 import json
 import os
-import threading
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote
 
 import bcrypt
-import requests
 import streamlit as st
-import streamlit.components.v1 as components
 from cryptography.fernet import Fernet
 
 st.set_page_config(layout="wide")
@@ -219,78 +216,42 @@ def render_pattern(p):
     st.caption(f"Quelle: {p['section']}")
 
 
-# =========================================================
-# app.py
-# =========================================================
-def find_pdf_path():
-    data_dir = Path(__file__).resolve().parent / "data"
-    pdf_files = sorted(data_dir.glob("*.pdf"))
-    return pdf_files[0] if pdf_files else None
-
-
-def get_or_start_pdf_server(pdf_path: Path):
-    key = "pdf_server"
-    if key in st.session_state:
-        return st.session_state[key]
-
-    class QuietHandler(SimpleHTTPRequestHandler):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=str(pdf_path.parent), **kwargs)
-
-        def log_message(self, format, *args):
-            return
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    st.session_state[key] = server
-    return server
-
-
-def render_pdf_panel():
-    pdf_path = find_pdf_path()
-
-    if not pdf_path:
-        st.info("Keine PDF-Datei im Ordner data gefunden.")
-        return
-
-    st.markdown("### 📄 PDF")
-    server = get_or_start_pdf_server(pdf_path)
-    pdf_url = f"http://127.0.0.1:{server.server_address[1]}/{quote(pdf_path.name)}"
-
-    components.iframe(pdf_url, height=850, scrolling=True)
-    st.caption("Die PDF wird direkt aus dem lokalen App-Ordner im Browser angezeigt.")
-    st.info("Falls der Frame leer bleibt, bitte die Seite neu laden.")
-
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-if not st.session_state.authenticated:
-    password = st.text_input("Passwort", type="password")
-
-    if st.button("Anmelden"):
-        stored_hash = st.secrets["PASSWORD_HASH"]
-
-        if bcrypt.checkpw(
-            password.encode(),
-            stored_hash.encode()
-        ):
-            st.session_state.authenticated = True
+def render_home_screen():
+    """Zeigt das Auswahlmenü mit Explorer und PDF"""
+    st.title("📘 Romanische Grammatik Explorer")
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2, gap="large")
+    
+    with col1:
+        st.markdown("### 🔍 Explorer")
+        st.markdown("Durchsuche Grammatik, Vokabeln und Aussprache.")
+        if st.button("Zum Explorer", key="explorer_btn", use_container_width=True):
+            st.session_state.view_mode = "explorer"
             st.rerun()
-        else:
-            st.error("Falsches Passwort")
+    
+    with col2:
+        st.markdown("### 📄 PDF")
+        st.markdown("Öffne die vollständige PDF-Referenz.")
+        if st.button("Zum PDF", key="pdf_btn", use_container_width=True):
+            st.session_state.view_mode = "pdf"
+            st.rerun()
 
-    st.stop()
 
-# Lade alle Daten (zuerst lokal, dann DATA_LINK)
-raw = load_raw()
-index = build_index(raw)
-
-st.title("📘 Romanische Grammatik Explorer")
-
-left_col, right_col = st.columns([2, 1], gap="large")
-
-with left_col:
+def render_explorer_mode():
+    """Suche und Filterung ohne PDF-Panel"""
+    col1, col2 = st.columns([3, 0.3], gap="small")
+    
+    with col1:
+        st.title("📘 Romanische Grammatik Explorer")
+    
+    with col2:
+        if st.button("← Zurück", key="explorer_back"):
+            st.session_state.view_mode = "home"
+            st.rerun()
+    
+    st.markdown("---")
+    
     # Eingabe für Suche
     query = st.text_input("Frage/Begriff eingeben:")
 
@@ -320,5 +281,93 @@ with left_col:
                 for t in topic_results:
                     render_topic(t)
 
-with right_col:
-    render_pdf_panel()
+
+def render_pdf_mode():
+    """PDF-Vollbildansicht mit allen Seiten"""
+    col1, col2 = st.columns([3, 0.3], gap="small")
+    
+    with col1:
+        st.markdown("# 📄 PDF Vollbildansicht")
+    
+    with col2:
+        if st.button("← Zurück", key="pdf_back"):
+            st.session_state.view_mode = "home"
+            st.rerun()
+    
+    st.markdown("---")
+    
+    pdf_path = find_pdf_path()
+
+    if not pdf_path:
+        st.info("Keine PDF-Datei im Ordner data gefunden.")
+        return
+
+    page_images = render_pdf_pages(pdf_path)
+    if not page_images:
+        st.warning("Die PDF konnte nicht in Bilder umgewandelt werden.")
+        return
+
+    st.markdown("Scroll nach unten, um alle Seiten des PDFs in voller Breite zu sehen.")
+
+    for page_num, image in page_images:
+        st.image(image, caption=f"Seite {page_num}", use_column_width=True)
+
+
+# =========================================================
+# app.py
+# =========================================================
+def find_pdf_path():
+    data_dir = Path(__file__).resolve().parent / "data"
+    pdf_files = sorted(data_dir.glob("*.pdf"))
+    return pdf_files[0] if pdf_files else None
+
+
+@st.cache_data(show_spinner=False)
+def render_pdf_pages(pdf_path: Path):
+    doc = fitz.open(str(pdf_path))
+    images = []
+    zoom = 2.0
+    matrix = fitz.Matrix(zoom, zoom)
+
+    for page_number in range(len(doc)):
+        page = doc.load_page(page_number)
+        pix = page.get_pixmap(matrix=matrix, alpha=False)
+        png_bytes = pix.tobytes(output="png")
+        images.append((page_number + 1, png_bytes))
+    return images
+
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    password = st.text_input("Passwort", type="password")
+
+    if st.button("Anmelden"):
+        stored_hash = st.secrets["PASSWORD_HASH"]
+
+        if bcrypt.checkpw(
+            password.encode(),
+            stored_hash.encode()
+        ):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Falsches Passwort")
+
+    st.stop()
+
+# Lade alle Daten (zuerst lokal, dann DATA_LINK)
+raw = load_raw()
+index = build_index(raw)
+
+if "view_mode" not in st.session_state:
+    st.session_state.view_mode = "home"
+
+# Zeige die entsprechende Ansicht basierend auf view_mode
+if st.session_state.view_mode == "home":
+    render_home_screen()
+elif st.session_state.view_mode == "explorer":
+    render_explorer_mode()
+elif st.session_state.view_mode == "pdf":
+    render_pdf_mode()
