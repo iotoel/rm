@@ -34,21 +34,28 @@ def load_raw():
         if github_token and github_json_base_url and github_json_file:
             headers = {"Authorization": f"token {github_token}"}
             json_url = f"{github_json_base_url}/{github_json_file}"
+            print(f"[DEBUG] Versuche JSON von GitHub zu laden: {json_url}")
             response = requests.get(json_url, headers=headers, timeout=10)
             response.raise_for_status()
+            print(f"[DEBUG] ✅ JSON erfolgreich von GitHub geladen")
             return response.json()
+        else:
+            print(f"[DEBUG] GitHub-Secrets nicht komplett gesetzt. Token: {bool(github_token)}, URL: {bool(github_json_base_url)}, File: {bool(github_json_file)}")
     except Exception as e:
-        pass  # Fallback versuchen
+        print(f"[DEBUG] ❌ Fehler beim Laden von GitHub: {e}")
     
     # 2. Versuch: unverschlüsselte lokale Datei
     try:
+        print(f"[DEBUG] Versuche lokale unverschlüsselte Datei zu laden: {LOCAL_PATH}")
         with open(LOCAL_PATH, "r", encoding="utf-8-sig") as f:
+            print(f"[DEBUG] ✅ Lokale JSON erfolgreich geladen")
             return json.load(f)
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        pass
+    except (FileNotFoundError, OSError, json.JSONDecodeError) as e:
+        print(f"[DEBUG] ❌ Lokale unverschlüsselte Datei nicht verfügbar: {e}")
 
     # 3. Versuch: verschlüsselte Datei (Fallback für alte Setups)
     try:
+        print(f"[DEBUG] Versuche verschlüsselte Datei zu laden: {ENCRYPTED_PATH}")
         key = st.secrets["FERNET_KEY"]
 
         with open(ENCRYPTED_PATH, "rb") as f:
@@ -57,10 +64,12 @@ def load_raw():
         fernet = Fernet(key.encode())
         decrypted = fernet.decrypt(encrypted)
 
+        print(f"[DEBUG] ✅ Verschlüsselte Datei erfolgreich entschlüsselt")
         return json.loads(decrypted.decode("utf-8-sig"))
 
     except Exception as e:
-        raise RuntimeError(f"Fehler beim Laden der Daten: {e}")
+        print(f"[DEBUG] ❌ Verschlüsselte Datei nicht verfügbar: {e}")
+        raise RuntimeError(f"Fehler beim Laden der Daten - alle Methoden fehlgeschlagen: {e}")
 
 
 # =========================================================
