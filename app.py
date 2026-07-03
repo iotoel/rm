@@ -338,6 +338,9 @@ def render_pdf_pages(pdf_path: Path = None):
                 github_pdf_base_url = st.secrets.get("GITHUB_PDF_BASE_URL")
                 github_pdf_files = st.secrets.get("GITHUB_PDF_FILES")
                 
+                # Debug-Ausgabe: Welche Secrets sind vorhanden?
+                all_secrets = list(st.secrets.keys())
+                
                 if github_token and github_pdf_base_url and github_pdf_files:
                     headers = {"Authorization": f"token {github_token}"}
                     
@@ -360,7 +363,17 @@ def render_pdf_pages(pdf_path: Path = None):
                     if not images:
                         raise ValueError("Keine Seiten aus PDFs geladen")
                 else:
-                    raise ValueError("GITHUB_TOKEN, GITHUB_PDF_BASE_URL oder GITHUB_PDF_FILES nicht in Secrets gefunden")
+                    # Detaillierte Debug-Info
+                    missing = []
+                    if not github_token:
+                        missing.append("GITHUB_TOKEN")
+                    if not github_pdf_base_url:
+                        missing.append("GITHUB_PDF_BASE_URL")
+                    if not github_pdf_files:
+                        missing.append("GITHUB_PDF_FILES")
+                    
+                    error_msg = f"Folgende Secrets fehlen: {', '.join(missing)}. Verfügbare Secrets: {all_secrets}"
+                    raise ValueError(error_msg)
             except Exception as e:
                 st.warning(f"Konnte PDFs nicht von GitHub laden: {e}")
                 # Fallback: Versuche lokale PDFs zu laden
