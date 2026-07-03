@@ -307,10 +307,10 @@ def render_pdf_mode():
         st.warning("Die PDF konnte nicht in Bilder umgewandelt werden.")
         return
 
-    st.markdown("Scroll nach unten, um alle Seiten des PDFs in voller Breite zu sehen.")
+    st.markdown("Scroll nach unten, um alle Seiten des PDFs zu sehen.")
 
     for page_num, image in page_images:
-        st.image(image, caption=f"Seite {page_num}", use_column_width=True)
+        st.image(image, caption=f"Seite {page_num}")
 
 
 # =========================================================
